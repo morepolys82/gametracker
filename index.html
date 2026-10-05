@@ -906,6 +906,8 @@
     .field { display: flex; flex-direction: column; gap: 6px; flex: 1 1 calc(50% - 4px); min-width: 0; }
     .field > span { font-size: 0.875rem; color: var(--text-secondary); }
     .field input, .field select { width: 100%; flex: auto !important; min-height: 48px; }
+    .quick-actions[hidden] { display: none; }
+    .add-form .cancel-add { min-height: 48px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-input); color: var(--text-primary); font-size: 1rem; }
     .quick-actions { position: sticky; bottom: max(10px, env(safe-area-inset-bottom)); margin-top: 16px; z-index: 5; }
     #quickAdd { width: 100%; border: 1px solid var(--accent); border-radius: 12px; background: var(--accent); color: #fff; font-size: 1rem; font-weight: 700; box-shadow: var(--shadow-lg); }
     .app:has(.add-form :focus, .edit-form :focus) .quick-actions { visibility: hidden; }
@@ -1264,6 +1266,7 @@
     const seasonMonths = getSeasonMonthKeys();
     let activeMonthKey = getCurrentMonthKey();
     let editingId = null;
+    let addFormOpen = false;
 
     function getEventsForMonth(monthKey) {
       return data.events.filter(ev => ev.monthKey === monthKey)
@@ -1407,6 +1410,8 @@
         activeMonthKey = getCurrentMonthKey();
       }
 
+      document.querySelector('.quick-actions').hidden = addFormOpen;
+      document.getElementById('quickAdd').setAttribute('aria-expanded', String(addFormOpen));
       const nextUpcomingId = getNextUpcomingId();
 
       // Tabs
@@ -1419,6 +1424,7 @@
         btn.setAttribute('aria-pressed', String(mk === activeMonthKey));
         btn.addEventListener('click', () => {
           activeMonthKey = mk;
+          addFormOpen = false;
           editingId = null;
           renderAll();
         });
@@ -1526,10 +1532,9 @@
           });
         }
 
-        const form = createAddForm(mk);
         panel.appendChild(header);
         panel.appendChild(list);
-        panel.appendChild(form);
+        if (addFormOpen && mk === activeMonthKey) panel.appendChild(createAddForm(mk));
         panelsContainer.appendChild(panel);
       });
 
@@ -1721,11 +1726,17 @@
             <input type="text" aria-label="Custom rink" id="rinkCustom_${monthKey}" class="rink-custom" placeholder="Custom rink..." style="display:none;" />
           </div>
         </div>
-        <button class="add-btn" data-month="${monthKey}">+ Add Game</button>
+        <button class="add-btn" data-month="${monthKey}">Save Game</button>
+        <button class="cancel-add" type="button">Cancel</button>
         <div class="text-small">Date must be within ${monthKey}</div>
       `;
 
       const addBtn = formDiv.querySelector('.add-btn');
+      formDiv.querySelector('.cancel-add').addEventListener('click', () => {
+        addFormOpen = false;
+        renderAll();
+        document.getElementById('quickAdd').focus({ preventScroll: true });
+      });
       const dateInput = formDiv.querySelector('.date-input');
       const timeInput = formDiv.querySelector('.time-input');
       const typeSelect = formDiv.querySelector('.type-select');
@@ -1813,7 +1824,9 @@
           }
           timeInput.value = '19:00';
           gearSelect.value = DEFAULT_GEAR;
+          addFormOpen = false;
           renderAll();
+          document.getElementById('quickAdd').focus({ preventScroll: true });
         } else {
           alert('Duplicate event or invalid data.');
         }
@@ -2436,6 +2449,9 @@
 
     // ----- INIT -----
     document.getElementById('quickAdd').addEventListener('click', () => {
+      addFormOpen = true;
+      editingId = null;
+      renderAll();
       const form = document.querySelector('.panel.active .add-form');
       if (form) {
         form.scrollIntoView({ behavior: 'auto', block: 'start' });
