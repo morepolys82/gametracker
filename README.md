@@ -6,7 +6,7 @@ A mobile-friendly hockey schedule and gear tracker built with HTML, CSS and Java
 
 Open index.html in a browser, or visit the GitHub Pages site. The app selects the current month when opened. Gear options include TAN, TACKS, WARRIOR, GSX and DIGI.
 
-Games are saved in browser storage on the current device. Google Sheets sync and calendar import require an internet connection and your own URLs entered in Settings & Import. Data does not automatically transfer between devices or from a local file to the hosted site.
+Games are saved in browser storage on the current device. Google Sheets sync and calendar import require an internet connection and the configured default URLs or your own URLs entered in Settings & Import. Data does not automatically transfer between devices or from a local file to the hosted site.
 
 ## Install and offline use
 

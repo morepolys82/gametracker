@@ -992,7 +992,7 @@
       <h3>📅 Import Calendar</h3>
       <div class="import-row">
         <input aria-label="Calendar URL" type="url" id="calendarUrl" placeholder="https://... or webcal://..." 
-               value="" />
+               value="webcal://canlan2-api.sportninja.net/v1/calendar/GAFNqGN5d9OKsYdO/games/" />
         <button class="import-btn" id="importCalendarBtn">⬇️ Import</button>
       </div>
       <div id="importStatus" class="import-status">Enter a calendar URL and click Import</div>
@@ -1013,7 +1013,7 @@
     const STORAGE_KEY = 'hockeyGamesTracker';
     const SHEETS_URL_KEY = 'hockeySheetsUrl';
 
-    const DEFAULT_SHEETS_URL = '';
+    const DEFAULT_SHEETS_URL = 'https://script.google.com/macros/s/AKfycbwfAVvBqa_PlOmEcsYd1ZZugqJsdhuGufKBRlrdltfScopo-a6Ms3Z38-6CSLkx6386/exec';
 
     function loadData() {
       const raw = localStorage.getItem(STORAGE_KEY);
@@ -2300,6 +2300,13 @@
 
     const importBtn = document.getElementById('importCalendarBtn');
     const calendarUrlInput = document.getElementById('calendarUrl');
+    const CALENDAR_URL_KEY = 'hockeyCalendarUrl';
+    calendarUrlInput.value = localStorage.getItem(CALENDAR_URL_KEY) || calendarUrlInput.defaultValue;
+    calendarUrlInput.addEventListener('input', () => {
+      const url = calendarUrlInput.value.trim();
+      if (url) localStorage.setItem(CALENDAR_URL_KEY, url);
+      else localStorage.removeItem(CALENDAR_URL_KEY);
+    });
     const importStatus = document.getElementById('importStatus');
 
     function setStatus(msg, type = '') {
