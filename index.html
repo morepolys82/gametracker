@@ -965,6 +965,7 @@
     <div class="tabs" id="tabsContainer" aria-label="Select month"></div>
   </div>
   <div class="panels-section" id="panelsContainer"></div>
+  <div id="autoSyncStatus" role="status" aria-live="polite" class="sync-status">☁️ Automatic Sheets sync is on</div>
   <details class="settings">
     <summary>⚙️ Settings &amp; Import</summary>
   <div class="bottom-sections">
@@ -1332,6 +1333,7 @@
     function deleteEvent(id) {
       data.events = data.events.filter(ev => ev.id !== id);
       saveData(data);
+      syncDeleteToSheets(id);
       editingId = null;
       renderAll();
     }
@@ -1370,6 +1372,7 @@
       };
       data.events.push(newEvent);
       saveData(data);
+      syncAddToSheets(newEvent);
       return true;
     }
 
@@ -1395,6 +1398,7 @@
       event.type = type || 'Game';
       event.gear = gear || DEFAULT_GEAR;
       saveData(data);
+      syncUpdateToSheets(event);
       return true;
     }
 
@@ -1483,7 +1487,6 @@
                 e.stopPropagation();
                 if (confirm('Delete this game?')) {
                   deleteEvent(ev.id);
-                  syncDeleteToSheets(ev.id);
                 }
               });
               list.appendChild(item);
@@ -1516,7 +1519,6 @@
                 e.stopPropagation();
                 if (confirm('Delete this game?')) {
                   deleteEvent(ev.id);
-                  syncDeleteToSheets(ev.id);
                 }
               });
               list.appendChild(item);
@@ -1650,8 +1652,6 @@
         }
 
         if (updateEvent(event.id, dateVal, timeVal, rinkVal, typeVal, gearVal)) {
-          const updated = data.events.find(e => e.id === event.id);
-          syncUpdateToSheets(updated);
           editingId = null;
           renderAll();
         } else {
@@ -1799,8 +1799,6 @@
 
         const success = addEvent(monthKey, dateVal, timeVal, rinkVal, typeVal, gearVal);
         if (success) {
-          const added = data.events[data.events.length - 1];
-          syncAddToSheets(added);
 
           rinkSelect.style.display = 'block';
           rinkSelect.value = '';
@@ -1867,6 +1865,7 @@
 
     function setSyncStatus(msg, type = '') {
       syncStatus.textContent = msg;
+      document.getElementById('autoSyncStatus').textContent = msg;
       syncStatus.className = 'sync-status' + (type ? ' ' + type : '');
     }
 
@@ -1888,7 +1887,8 @@
         if (!confirm('That doesn\'t look like a Google Apps Script URL. Save anyway?')) return;
       }
       saveSheetsUrl(url);
-      setSyncStatus('✅ URL saved! You can now push/pull.', 'success');
+      setSyncStatus('✅ URL saved! Automatic sync is on.', 'success');
+      drainSyncQueue();
     });
 
     function jsonpGet(baseUrl) {
@@ -1981,35 +1981,70 @@
       }
     });
 
-    function syncAddToSheets(event) {
-      const url = getSheetsUrl();
-      if (!url) return;
-      fireAndForgetPost(url, { action: 'add', event })
-        .then(ok => {
-          if (ok) setSyncStatus('✅ Synced to Sheets', 'success');
-          else setSyncStatus('⚠️ Sheet sync failed', 'error');
-        });
+    // Persist individual writes so offline changes survive closing the app.
+    const SYNC_QUEUE_KEY = 'hockeySheetsPendingWrites';
+    let syncQueue;
+    try {
+      const saved = JSON.parse(localStorage.getItem(SYNC_QUEUE_KEY) || '[]');
+      syncQueue = Array.isArray(saved) ? saved : [];
+    } catch (_) { syncQueue = []; }
+    let syncRunning = false;
+    let syncRetryTimer = null;
+
+    function persistSyncQueue() {
+      localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(syncQueue));
     }
 
-    function syncUpdateToSheets(event) {
-      const url = getSheetsUrl();
-      if (!url || !event) return;
-      fireAndForgetPost(url, { action: 'update', event })
-        .then(ok => {
-          if (ok) setSyncStatus('✅ Updated in Sheets', 'success');
-          else setSyncStatus('⚠️ Sheet update failed', 'error');
-        });
+    function queueSheetsWrite(body) {
+      // Snapshot now; later edits must not change an earlier queued request.
+      syncQueue.push({ url: getSheetsUrl(), body: JSON.parse(JSON.stringify(body)) });
+      persistSyncQueue();
+      setSyncStatus(`⏳ ${syncQueue.length} change(s) waiting to send`, 'loading');
+      drainSyncQueue();
     }
 
-    function syncDeleteToSheets(id) {
-      const url = getSheetsUrl();
-      if (!url) return;
-      fireAndForgetPost(url, { action: 'delete', id })
-        .then(ok => {
-          if (ok) setSyncStatus('✅ Deleted from Sheets', 'success');
-          else setSyncStatus('⚠️ Sheet delete failed', 'error');
-        });
+    async function drainSyncQueue() {
+      if (syncRunning || !syncQueue.length) return;
+      clearTimeout(syncRetryTimer);
+      if (!navigator.onLine) {
+        setSyncStatus(`📴 ${syncQueue.length} change(s) saved locally; will send when online`, '');
+        return;
+      }
+      syncRunning = true;
+      try {
+        while (syncQueue.length) {
+          const item = syncQueue[0];
+          const url = item.url || getSheetsUrl();
+          if (!url) {
+            setSyncStatus('⚠️ Changes saved locally. Configure a Sheets URL to send them.', 'error');
+            return;
+          }
+          setSyncStatus(`⏳ Sending ${syncQueue.length} change(s) to Sheets…`, 'loading');
+          const ok = await fireAndForgetPost(url, item.body);
+          if (!ok) {
+            setSyncStatus(`⚠️ ${syncQueue.length} change(s) saved locally; sending failed, will retry`, 'error');
+            syncRetryTimer = setTimeout(drainSyncQueue, 30000);
+            return;
+          }
+          syncQueue.shift();
+          persistSyncQueue();
+        }
+        // Apps Script uses no-cors POST: delivery is attempted, but the server
+        // response cannot be read. Never claim a confirmed spreadsheet save.
+        setSyncStatus('☁️ Changes sent to Sheets · save not confirmed by server', '');
+      } finally {
+        syncRunning = false;
+      }
     }
+
+    function syncAddToSheets(event) { queueSheetsWrite({ action: 'add', event }); }
+    function syncUpdateToSheets(event) { queueSheetsWrite({ action: 'update', event }); }
+    function syncDeleteToSheets(id) { queueSheetsWrite({ action: 'delete', id }); }
+
+    window.addEventListener('online', drainSyncQueue);
+    window.addEventListener('offline', () => {
+      if (syncQueue.length) setSyncStatus(`📴 ${syncQueue.length} change(s) waiting for connection`, '');
+    });
 
     pushBtn.addEventListener('click', async () => {
       clearSyncLog();
@@ -2378,13 +2413,6 @@
 
         renderAll();
 
-        if (newEvents.length > 0 && getSheetsUrl()) {
-          const eventsToSend = newEvents.map(ev => ({
-            id: ev.id, date: ev.date, time: ev.time, rink: ev.rink, type: ev.type, gear: ev.gear
-          }));
-          await fireAndForgetPost(getSheetsUrl(), { action: 'batchAdd', events: eventsToSend });
-        }
-
         let msg = `✅ Imported ${addedCount} games`;
         if (skippedCount > 0) msg += ` (${skippedCount} dupes skipped)`;
         if (outsideSeason > 0) msg += ` (${outsideSeason} outside season)`;
@@ -2418,10 +2446,12 @@
 
     const savedUrl = localStorage.getItem(SHEETS_URL_KEY);
     if (savedUrl && savedUrl.trim()) {
-      setSyncStatus('ℹ️ Custom Sheets URL configured.', '');
+      setSyncStatus('☁️ Automatic sync on · custom Sheets URL', '');
     } else {
-      setSyncStatus('ℹ️ Using default Sheets URL. Ready to sync.', '');
+      setSyncStatus('☁️ Automatic sync on · changes send when saved', '');
     }
+
+    drainSyncQueue();
 
     window.addEventListener('storage', (e) => {
       if (e.key === STORAGE_KEY) {
